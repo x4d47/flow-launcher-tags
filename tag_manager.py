@@ -1,6 +1,7 @@
 import difflib
 import json
 from dataclasses import asdict
+from pathlib import Path
 from typing import Self
 
 from programs import Program
@@ -32,8 +33,8 @@ class TagManager:
         return self._tag_to_programs.get(tag, [])
 
     @classmethod
-    def from_file(cls, filename: str = "tags.json") -> Self:
-        with open(filename, "r", encoding="utf-8") as f:
+    def from_file(cls, path: Path) -> Self:
+        with open(path, "r", encoding="utf-8") as f:
             raw_data = json.load(f)
 
         tag_to_programs = {
@@ -43,13 +44,13 @@ class TagManager:
 
         return cls(tag_to_programs)
 
-    def to_file(self, filename: str = "tags.json") -> None:
+    def to_file(self, path: Path) -> None:
         serializable_dict = {
             tag: [asdict(program) for program in programs_list]
             for tag, programs_list in self._tag_to_programs.items()
         }
 
-        with open(filename, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(serializable_dict, f, ensure_ascii=False, indent=4)
 
     def find(self, name: str) -> list[str]:

@@ -1,6 +1,7 @@
 import difflib
 import json
 from dataclasses import asdict
+from pathlib import Path
 from typing import Self
 
 from programs import Program, ProgramDict, get_all_installed_programs
@@ -36,12 +37,12 @@ class ProgramManager:
         return cls(programs)
 
     @classmethod
-    def from_file(cls, filename: str = "programs.json") -> Self:
+    def from_file(cls, path: Path) -> Self:
         """
         Load programs from a structured JSON file.
 
         Args:
-            filename: The path to the JSON file. Defaults to "programs.json".
+            filename: The Path to the JSON file.
 
         Returns:
             An instance of ProgramManager populated with data from the file.
@@ -51,26 +52,26 @@ class ProgramManager:
             json.JSONDecodeError: If the file contains invalid JSON data.
             TypeError/KeyError: If the JSON structure does not match Program fields.
         """
-        with open(filename, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data: list[ProgramDict] = json.load(f)  # pyright: ignore[reportAny]
 
             programs: list[Program] = [Program(**program_data) for program_data in data]
 
         return cls(programs)
 
-    def to_file(self, filename: str = "programs.json") -> None:
+    def to_file(self, path: Path) -> None:
         """
         Save the current list of programs to a JSON file.
 
         Args:
-            filename: The destination file path. Defaults to "programs.json".
+            filename: The destination file Path.
 
         Raises:
             OSError: If the file cannot be written (e.g., due to permission errors).
         """
         program_data = [asdict(program) for program in self._programs]
 
-        with open(filename, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(program_data, f)
 
     def find_one(self, name: str) -> Program | None:

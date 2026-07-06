@@ -1,6 +1,8 @@
 import logging
+import os
 import subprocess
 import webbrowser
+from pathlib import Path
 from typing import Callable, override
 
 from flowlauncher.FlowLauncher import FlowLauncher
@@ -31,11 +33,20 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+appdata = os.environ.get("APPDATA")
+
 PLUGIN_KEYWORD = "tag"
+PLUGIN_DATADIR = (
+    (Path(appdata) / "FlowLauncher" / "Cache" / "Plugins" / "Tags")
+    if appdata
+    else Path(".")
+)
 
 
 class TagsPlugin(FlowLauncher):
     def __init__(self):
+        self.new_query: str
+
         self.command_registry: dict[
             Command, Callable[..., FlowLauncherResult | None]
         ] = {
@@ -45,15 +56,21 @@ class TagsPlugin(FlowLauncher):
         }
 
         try:
-            self.program_manager: ProgramManager = ProgramManager.from_file()
+            self.program_manager: ProgramManager = ProgramManager.from_file(
+                PLUGIN_DATADIR / "programs.json"
+            )
             logger.info("Loaded programs from file")
-        except Exception as e:
+        except (
+            Exception
+        ) as e:  # todo: should differentiate access problems from file unexistence
             logger.exception("Failed to load programs from file: %s", e)
             self.program_manager = ProgramManager.from_os()
-            self.program_manager.to_file()
+            self.program_manager.to_file(PLUGIN_DATADIR / "programs.json")
 
         try:
-            self.tag_manager: TagManager = TagManager.from_file()
+            self.tag_manager: TagManager = TagManager.from_file(
+                PLUGIN_DATADIR / "tags.json"
+            )
             logger.info("Loaded tags from file")
         except Exception as e:
             logger.exception("Failed to load tags from file: %s", e)
@@ -130,7 +147,7 @@ class TagsPlugin(FlowLauncher):
                 "JsonRPCAction": {
                     "method": "Flow.Launcher.ChangeQuery",
                     "parameters": [
-                        f"{PLUGIN_KEYWORD} {CommandKeyword.REMOVE_TAG} ",
+                        f"{self.new_query} {CommandKeyword.REMOVE_TAG} ",
                         False,
                     ],
                     "dontHideAfterAction": True,
@@ -148,10 +165,10 @@ class TagsPlugin(FlowLauncher):
                     {
                         "Title": f"{tag}",
                         "IcoPath": "Images/transparent.png",
-                        "QuerySuggestionText": f"{tag} ",
+                        "QuerySuggestionText": f"{tag}",
                         "JsonRPCAction": {
                             "method": "Flow.Launcher.ChangeQuery",
-                            "parameters": [f"{PLUGIN_KEYWORD} {tag} ", False],
+                            "parameters": [f"{self.new_query} {tag} ", False],
                             "dontHideAfterAction": True,
                         },
                     }
@@ -164,6 +181,7 @@ class TagsPlugin(FlowLauncher):
 
         match context.type:
             case [AutocompleteType.TAG, AutocompleteType.COMMAND]:
+                self.new_query = f"{PLUGIN_KEYWORD}"
                 result = [
                     *self.autocomplete_command(),
                     *self.autocomplete_tag(context.prefix),
@@ -186,7 +204,9 @@ class TagsPlugin(FlowLauncher):
                 "Success", f"Assigned tag '{tag}' to program '{program_name}'"
             )
 
-            self.tag_manager.to_file()
+            self.tag_manager.to_file(
+                PLUGIN_DATADIR / "tags.json"
+            )  # todo: catch possible exception
         else:
             FlowLauncherAPI.show_msg(
                 "Cannot assign tag", f"Program '{program}' not found."
