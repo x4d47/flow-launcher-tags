@@ -38,6 +38,8 @@ class AutocompleteType(Enum):
     COMMAND = auto()
     TAG = auto()
     PROGRAM = auto()
+    ADD_TAG_PROGRAM = auto()
+    REMOVE_TAG_PROGRAM = auto()
     NOTHING = auto()
 
 
@@ -45,6 +47,7 @@ class AutocompleteType(Enum):
 class AutocompleteContext:
     type: list[AutocompleteType]
     prefix: str
+    args: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -96,12 +99,12 @@ class GrammarNode:
         self.children.append(child_node)
         return self.children[-1]
 
-    def next_node(self, token_type: TokenType) -> Self:
+    def next_node(self, token_type: TokenType) -> Self | None:
         for child in self.children:
             if token_type == child.expected_token_type:
                 return child
 
-        raise ParserError("unexpected token")
+        return None
 
     def set_last(self):
         self.is_last = True
@@ -118,19 +121,23 @@ grammar.add_child_and_return(
 grammar.add_child(GrammarNode(AddTag,    GrammarNodeType.OP_ADD, [AutocompleteType.TAG]))
 grammar.add_child(GrammarNode(RemoveTag, GrammarNodeType.OP_REM, [AutocompleteType.TAG]))
 
-grammar.next_node(TokenType.OP_ADD)                                                                 \
-    .add_child_and_return(GrammarNode(AddTag, GrammarNodeType.SPACE,   [AutocompleteType.TAG]))     \
-    .add_child_and_return(GrammarNode(AddTag, GrammarNodeType.TAG,     [AutocompleteType.TAG]))     \
-    .add_child_and_return(GrammarNode(AddTag, GrammarNodeType.SPACE,   [AutocompleteType.PROGRAM])) \
-    .add_child_and_return(GrammarNode(AddTag, GrammarNodeType.PROGRAM, [AutocompleteType.PROGRAM])) \
+(
+grammar.next_node(TokenType.OP_ADD)
+    .add_child_and_return(GrammarNode(AddTag, GrammarNodeType.SPACE,   [AutocompleteType.TAG])) # pyright: ignore[reportOptionalMemberAccess]
+    .add_child_and_return(GrammarNode(AddTag, GrammarNodeType.TAG,     [AutocompleteType.TAG]))
+    .add_child_and_return(GrammarNode(AddTag, GrammarNodeType.SPACE,   [AutocompleteType.ADD_TAG_PROGRAM]))
+    .add_child_and_return(GrammarNode(AddTag, GrammarNodeType.PROGRAM, [AutocompleteType.ADD_TAG_PROGRAM]))
     .set_last()
+)
 
-grammar.next_node(TokenType.OP_REM)                                                                    \
-    .add_child_and_return(GrammarNode(RemoveTag, GrammarNodeType.SPACE,   [AutocompleteType.TAG]))     \
-    .add_child_and_return(GrammarNode(RemoveTag, GrammarNodeType.TAG,     [AutocompleteType.TAG]))     \
-    .add_child_and_return(GrammarNode(RemoveTag, GrammarNodeType.SPACE,   [AutocompleteType.PROGRAM])) \
-    .add_child_and_return(GrammarNode(RemoveTag, GrammarNodeType.PROGRAM, [AutocompleteType.PROGRAM])) \
+(
+grammar.next_node(TokenType.OP_REM)
+    .add_child_and_return(GrammarNode(RemoveTag, GrammarNodeType.SPACE,   [AutocompleteType.TAG])) # pyright: ignore[reportOptionalMemberAccess]
+    .add_child_and_return(GrammarNode(RemoveTag, GrammarNodeType.TAG,     [AutocompleteType.TAG]))
+    .add_child_and_return(GrammarNode(RemoveTag, GrammarNodeType.SPACE,   [AutocompleteType.REMOVE_TAG_PROGRAM]))
+    .add_child_and_return(GrammarNode(RemoveTag, GrammarNodeType.PROGRAM, [AutocompleteType.REMOVE_TAG_PROGRAM]))
     .set_last()
+)
 # fmt: on
 
 
@@ -144,7 +151,13 @@ class Parser:
         if token.type == TokenType.NOTHING:
             return
 
-        self.current_grammar_node = self.current_grammar_node.next_node(token.type)
+        next_node = self.current_grammar_node.next_node(token.type)
+
+        if not next_node:
+            return
+
+        self.current_grammar_node = next_node
+
         self.current_token = token
 
         match self.current_grammar_node.semantic_role:
@@ -165,7 +178,9 @@ class Parser:
             )  # strip() in case the value is space
 
         return AutocompleteContext(
-            self.current_grammar_node.autocomplete_type_list, prefix
+            self.current_grammar_node.autocomplete_type_list,
+            prefix,
+            self.command_args.copy(),
         )
 
     def get_result(self) -> ParserResult:

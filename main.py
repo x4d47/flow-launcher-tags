@@ -91,6 +91,48 @@ class LaunchProgramResult(Result):
         return ExecuteResponse(hide=True)
 
 
+class AddTagToProgramResult(Result):
+    def __init__(
+        self,
+        tag: str,
+        program: Program,
+        api: FlowLauncherAPI,
+        **kwargs: Unpack[ResultConstructorKwargs],
+    ):
+        super().__init__(**kwargs)
+        self.tag: str = tag
+        self.program: Program = program
+        self.api: FlowLauncherAPI = api
+
+    @override
+    async def callback(self):
+        await self.api.show_error_message(
+            "Success!", f"Added tag '{self.tag}' to program '{self.program.name}'"
+        )
+        return ExecuteResponse(hide=True)
+
+
+class RemoveTagFromProgramResult(Result):
+    def __init__(
+        self,
+        tag: str,
+        program: Program,
+        api: FlowLauncherAPI,
+        **kwargs: Unpack[ResultConstructorKwargs],
+    ):
+        super().__init__(**kwargs)
+        self.tag: str = tag
+        self.program: Program = program
+        self.api: FlowLauncherAPI = api
+
+    @override
+    async def callback(self):
+        await self.api.show_error_message(
+            "Success!", f"Removed tag '{self.tag}' from program '{self.program.name}'"
+        )
+        return ExecuteResponse(hide=True)
+
+
 # largest score value in FlowLauncher (2^31 - 1)
 MAX_SCORE: int = 2_147_483_647
 
@@ -145,15 +187,19 @@ class TagsPlugin(Plugin):
             logger.exception("Parser error: %s", e)
             return results
 
-        results.extend(
-            self.autocomplete(query.original_query, parser_result.autocomplete_context)
-        )
+        context: AutocompleteContext = parser_result.autocomplete_context
+        base_query: str = self.get_base_query(query.original_query, context.prefix)
+
+        if not parser_result.command:
+            results.extend(self.autocomplete(base_query, context))
+            return results
 
         match parser_result.command:
             case GetProgramsByTag():
+                results.extend(self.autocomplete_tag(base_query, context.prefix))
                 results.extend(self.get_programs_by_tag(parser_result.command.tag_name))
-            case None:
-                pass
+            case AddTag() | RemoveTag():
+                results.extend(self.autocomplete(base_query, context))
             case _:
                 pass
 
@@ -174,6 +220,50 @@ class TagsPlugin(Plugin):
             )
 
         return result
+
+    def get_programs_add_tag_action(self, tag: str, prefix: str) -> list[Result]:
+        results: list[Result] = []
+
+        if prefix:
+            programs_found: list[Program] = self.program_manager.find(prefix)
+        else:
+            programs_found = self.program_manager.programs
+
+        for program in programs_found:
+            results.append(
+                AddTagToProgramResult(
+                    title=f"{program.name}",
+                    query_suggestion_text=f"{program.name}",
+                    icon=program.icon_to_data_uri("Images/transparent.png"),
+                    tag=tag,
+                    program=program,
+                    api=self.api,
+                )
+            )
+
+        return results
+
+    def get_programs_remove_tag_action(self, tag: str, prefix: str) -> list[Result]:
+        results: list[Result] = []
+
+        if prefix:
+            programs_found: list[Program] = self.program_manager.find(prefix)
+        else:
+            programs_found = self.program_manager.programs
+
+        for program in programs_found:
+            results.append(
+                RemoveTagFromProgramResult(
+                    title=f"{program.name}",
+                    query_suggestion_text=f"{program.name}",
+                    icon=program.icon_to_data_uri("Images/transparent.png"),
+                    tag=tag,
+                    program=program,
+                    api=self.api,
+                )
+            )
+
+        return results
 
     def autocomplete_command(self, base_query: str) -> list[Result]:
         return [
@@ -199,7 +289,7 @@ class TagsPlugin(Plugin):
         results: list[Result] = []
 
         for tag in self.tag_manager.tags:
-            if tag.startswith(prefix):
+            if tag != prefix and tag.startswith(prefix):
                 results.append(
                     ChangeQueryResult(
                         title=f"{tag}",
@@ -214,8 +304,6 @@ class TagsPlugin(Plugin):
 
     def autocomplete_program(self, base_query: str, prefix: str) -> list[Result]:
         results: list[Result] = []
-
-        logger.debug("Prefix: %s", prefix)
 
         if prefix:
             programs_found: list[Program] = self.program_manager.find(prefix)
@@ -235,17 +323,22 @@ class TagsPlugin(Plugin):
 
         return results
 
-    def autocomplete(self, query: str, context: AutocompleteContext) -> list[Result]:
-        result: list[Result] = []
-
-        if context.prefix and query.endswith(context.prefix):
+    def get_base_query(self, query: str, prefix: str) -> str:
+        if prefix and query.endswith(prefix):
             # query without autocomplete prefix
-            base_query = query[: -len(context.prefix)]
+            base_query = query[: -len(prefix)]
         else:
             base_query = query
 
         if base_query and not base_query.endswith(" "):
             base_query += " "
+
+        return base_query
+
+    def autocomplete(
+        self, base_query: str, context: AutocompleteContext
+    ) -> list[Result]:
+        result: list[Result] = []
 
         match context.type:
             case [AutocompleteType.COMMAND, AutocompleteType.TAG]:
@@ -257,6 +350,12 @@ class TagsPlugin(Plugin):
                 result = self.autocomplete_tag(base_query, context.prefix)
             case [AutocompleteType.PROGRAM]:
                 result = self.autocomplete_program(base_query, context.prefix)
+            case [AutocompleteType.ADD_TAG_PROGRAM]:
+                tag_name = context.args["tag_name"]  # should not fail
+                result = self.get_programs_add_tag_action(tag_name, context.prefix)
+            case [AutocompleteType.REMOVE_TAG_PROGRAM]:
+                tag_name = context.args["tag_name"]  # should not fail
+                result = self.get_programs_remove_tag_action(tag_name, context.prefix)
             case _:
                 pass
 
